@@ -1,0 +1,138 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+install.packages("knitr")
+library(knitr)
+
+---
+title: "AppBioProjAppendix"
+author: "Gyumin Oh"
+date: "2024-12-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This appendix provides the R command log for the analysis and data transformations made in this report
+
+```{r}
+library(dplyr)
+
+# Define the count files (which files to use)
+count_files <- list.files(path = "~/Desktop/yeast_chr/deseq/", pattern = "*_counts.csv", full.names = TRUE)
+
+# Initialise an empty list to store data frames
+count_list <- list()
+View(count_files)
+# Loop through each counts file and load into R
+for (file in count_files) {
+  # Read the count file
+  count_data <- read.table(file, header = TRUE, row.names = 1, sep = ",")
+  
+  # Extract the sample name from the file name
+  sample_name <- sub("_counts.csv", "", basename(file))
+  
+  # Rename the counts column to the sample name
+  colnames(count_data) <- c(sample_name)
+  
+  # Add the data frame to the list
+  count_list[[sample_name]] <- count_data
+}
+
+
+# Combine all data frames by row names (gene IDs)
+combined_counts <- Reduce(function(x, y) merge(x, y, by = "row.names", all = TRUE), count_list)
+
+# Fix row names after merging
+rownames(combined_counts) <- combined_counts$Row.names
+combined_counts
+combined_counts <- combined_counts[ , -1]
+
+# Replace missing data with zeros (if any genes are not present in some samples)
+#combined_counts[is.na(combined_counts)] <- 0
+
+# Write the combined matrix to a csv file
+write.csv(combined_counts, file = "~/Desktop/yeast_chr/deseq/round1.csv", quote = FALSE, row.names = TRUE)
+
+setwd("~/Desktop/yeast_chr/deseq/")
+round_x <- read.csv("round1.csv")
+View(round_x)
+```
+
+The code above merges multiple CSV files containing count data into a single table, ensuring all row identifiers (e.g., gene IDs) are aligned.
+
+```{r}
+#install.packages("BiocManager")
+library(BiocManager)
+library(dplyr)
+library(ggplot2)
+#BiocManager::install("DESeq2")
+library(DESeq2)
+setwd("../deseq/")
+# Load the counts matrix (change path to wherever you put allCounts to)
+counts <- read.csv("allCounts.csv", sep=",", row.names = NULL)
+
+# Display the loaded counts data
+View(counts)
+
+# Ensure unique row names
+uniq_name <- make.names(counts$X, unique = TRUE)
+row.names(counts) <- uniq_name
+
+View(counts)
+
+counts <- counts[, c(-1)]
+
+# Remove the first column (assumed to be gene names) to retain only the count data
+mat <- counts
+
+# Display the processed counts matrix
+View(counts)
+dim(counts)
+
+final_counts <- counts
+
+View(final_counts)
+mat <- final_counts
+
+# Create a metadata dataframe specifying conditions for each sample
+samples <- data.frame(theSample = rep(c("wt", "sy14"), each=6))
+View(samples)
+
+
+# Create DESeq2 dataset
+ds <- DESeqDataSetFromMatrix(countData=mat, colData=samples, design=~theSample)
+
+# Assigning sample names in the data set object may be useful in downstream analysis
+colnames(ds) <- colnames(mat)
+
+# Run DESeq2 analysis
+ds <- DESeq(ds)
+
+# Extract results
+res <- results(ds)
+View(res)
+
+
+
+# Filter significant results based on adjusted p-value (e.g., p < 0.05)
+sig <- res[which(res$padj < 0.001), ]
+sig
+
+# Further filter results based on log2 fold-change thresholds
+sigLf <- sig[ which(sig$log2FoldChange < -1 | sig$log2FoldChange > 1), ]
+sigLf
+
+# Save results to csv file
+write.csv(as.data.frame(res), file = "deseq2_results.csv")
+```
+
+Above is the code used for the differential expression analysis
+
+
