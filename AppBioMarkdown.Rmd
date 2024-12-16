@@ -19,7 +19,88 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## R Markdown
 
-This appendix provides the R command log for the analysis and data transformations made in this report
+This appendix provides the command log for the analysis and data transformations made in this report. All bash scripts were run on the HPC and R scripts locally.
+
+```{bash}
+#!/bin/bash
+module load sra-tools/3.0.3-gcc-13.2.0
+cd /scratch_tmp/users/k24052661/alignment/raw_fastq
+fastq-dump --split-files SRR7059704
+fastq-dump --split-files SRR7059705
+fastq-dump --split-files SRR7059706
+fastq-dump --split-files SRR7059707
+fastq-dump --split-files SRR7059708
+fastq-dump --split-files SRR7059709
+```
+This bash scipt was used to download the fastq files
+
+```{bash}
+#!/bin/bash
+
+cd /scratch_tmp/users/k24052661/alignment/raw_fastq
+
+module load fastqc/0.12.1-gcc-13.2.0
+module load trimgalore/0.6.6-gcc-13.2.0-python-3.11.6
+
+trim_galore --fastqc --output_dir /scratch_tmp/users/k24052661/alignment/trimmed_fastq *.fastq
+```
+This bash script ran FASTQC (version 0.12.1) and trim-galore (version 0.6.6) to ensure high quality.
+
+```{bash}
+#!/bin/bash
+module load bowtie2/2.5.1-gcc-13.2.0-python-3.11.6
+bowtie2 -x bowtie_index/yeast_S288C SRR7059706_1_trimmed.fq --no-unal -S wt_r2_1.sam
+bowtie2 -x bowtie_index/yeast_S288C SRR7059706_2_trimmed.fq --no-unal -S wt_r2_2.sam
+```
+Bowtie 2.5.1 was used to run the alignment
+
+```{bash}
+#!/bin/bash
+
+# Define the list of SAM files that we will process
+FILES=(
+    "sy14_r1_1.sam" "sy14_r1_2.sam" "sy14_r2_1.sam" "sy14_r2_2.sam"
+    "sy14_r3_1.sam" "sy14_r3_2.sam" "wt_r1_1.sam" "wt_r1_2.sam"
+    "wt_r2_1.sam" "wt_r2_2.sam" "wt_r3_1.sam" "wt_r3_2.sam"
+)
+
+# Path to annotation file (modify this path to your actual annotation file)
+ANNOTATION="annotation_sam_file_processing.gtf"
+
+# Create output directory for processed files
+mkdir -p processed
+
+# Step 1: Process each SAM file
+for FILE in "${FILES[@]}"; do
+    # Extract the base name from the file name
+    BASENAME=$(basename "$FILE" .sam)
+
+    echo "Processing $FILE ..."
+
+    # Convert SAM to BAM
+    samtools view -Sb "$FILE" > "processed/$BASENAME.bam"
+
+    # Sort BAM
+    samtools sort "processed/$BASENAME.bam" -o "processed/$BASENAME.sorted.bam"
+
+    # Index BAM
+    samtools index "processed/$BASENAME.sorted.bam"
+
+    echo "$FILE converted, sorted, and indexed."
+done
+
+# Step 2: Count reads using featureCounts
+SORTED_BAMS=$(find processed -name "*.sorted.bam" | tr '\n' ' ')
+
+# Output count file
+COUNTS_OUTPUT="gene_counts.txt"
+
+featureCounts -a "$ANNOTATION" -o "$COUNTS_OUTPUT" $SORTED_BAMS
+
+echo "Read counting complete. Results saved to $COUNTS_OUTPUT."
+```
+This bash script was used to process the SAM files into BAM files.
+
 
 ```{r}
 library(dplyr)
@@ -65,7 +146,7 @@ round_x <- read.csv("round1.csv")
 View(round_x)
 ```
 
-The code above merges multiple CSV files containing count data into a single table, ensuring all row identifiers (e.g., gene IDs) are aligned.
+The R code above merges multiple CSV files containing count data into a single table, ensuring all row identifiers (e.g., gene IDs) are aligned.
 
 ```{r}
 #install.packages("BiocManager")
@@ -133,6 +214,48 @@ sigLf
 write.csv(as.data.frame(res), file = "deseq2_results.csv")
 ```
 
-Above is the code used for the differential expression analysis
+Above is the R code used for the differential expression analysis
 
+```{r}
+# Normalise using variance stabilising transformation (VST)
+data_vst <- vst(dds, blind = FALSE)
+
+# Extract the normalised expression matrix
+expression_matrix <- assay(data_vst)
+
+# Save the normalised expression matrix to a CSV file
+write.csv(expression_matrix, file = "expression_matrix.csv", quote = FALSE, row.names = TRUE)
+
+# Load normalised expression matrix 
+expression_matrix <- read.csv("expression_matrix.csv", row.names = 1)
+
+# Calculate Pearson correlations between samples
+correlation_matrix <- cor(expression_matrix, method = "pearson")
+
+# Define the custom sample order
+column_order <- c("SY14_3", "SY14_1", "SY14_2", "BY4742_2", "BY4742_1", "BY4742_3")
+
+# Ensure column names of the matrix match the custom order and  reorder the columns of the matrix
+expression_matrix <- expression_matrix[, column_order]
+
+# Generate heatmap with ComplexHeatmap
+Heatmap(
+  expression_matrix,
+  name = "Expression value",            
+  show_row_names = FALSE,               # Hide row gene names for clarity
+  show_column_names = TRUE,             # Display sample names
+  cluster_rows = TRUE,                  # Cluster genes
+  cluster_columns = FALSE,               # No clustering of columns so that custom order is displayed
+  column_title = "Samples",             # Title above columns
+  col = colorRamp2(c(0, 2, 4), c("blue", "yellow", "red")), # Colour scale used in paper
+  heatmap_legend_param = list(title = "Expression Value") # Legend title
+)
+
+# Confirm Pearson correlation similarity
+print(correlation_matrix)
+
+cat("Differential expression analysis complete. Results saved to 'deseq2_results.csv'.")
+```
+
+The R code above was used to generate a heatmap using the package "ComplexHeatmap".
 
